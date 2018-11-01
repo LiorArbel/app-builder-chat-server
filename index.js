@@ -1,7 +1,22 @@
 var WebSocketServer = require('websocket').server;
 var http = require('http');
+var _ = require('lodash');
+const logger = require('./logger');
 
+let channels = new Map();
 let connections = new Set();
+
+function getOrCreateChannel(id){
+    let channel;
+    if(!channels.has(id)){
+        channel = new Set();
+        channels.add(id, channel);
+    } else {
+        channel = channels.get(id);
+    }
+    return channel;
+}
+
 var server = http.createServer(function (request, response) {
     // process HTTP request. Since we're writing just WebSockets
     // server we don't have to implement anything.
@@ -14,31 +29,37 @@ wsServer = new WebSocketServer({
     httpServer: server
 });
 
+const messageTypes = {TEXT: 'TEXT', SYSTEM: 'SYSTEM'};
+
 // WebSocket server
-wsServer.on('request', function (request) {
+wsServer.on('request', function (request, httpReq) {
     var connection = request.accept(null, request.origin);
-    log('new connection');
+    logger.log('new connection');
     connections.add(connection);
 
     // This is the most important callback for us, we'll handle
     // all messages from users here.
     connection.on('message', function (message) {
-        log('message: ', message);
-        if (message.type === 'utf8') {
+        logger.log('message: ', message);
+        let parsedMessage;
+        try{
+            parsedMessage = JSON.parse(message.utf8Data);
+        } catch (e) {
+            logger.error('unparsable message: ', message);
+        }
+        if (parsedMessage) {
+            parsedMessage.time = new Date();
+            parsedMessage.type = messageTypes.TEXT;
             connections.forEach(conn => {
-                conn.send(message.utf8Data);
+                conn.send(JSON.stringify(parsedMessage));
             })
         }
     });
 
     connection.on('close', function (connection) {
-        log('disconnection');
+        logger.log('disconnection');
         connections.delete(connection);
     });
 });
 
-log('listening...');
-
-function log(...args) {
-    console.log((new Date()).toLocaleString(), ...args);
-}
+logger.log('listening...');
