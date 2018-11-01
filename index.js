@@ -4,13 +4,12 @@ var _ = require('lodash');
 const logger = require('./logger');
 
 let channels = new Map();
-let connections = new Set();
 
 function getOrCreateChannel(id){
     let channel;
     if(!channels.has(id)){
         channel = new Set();
-        channels.add(id, channel);
+        channels.set(id, channel);
     } else {
         channel = channels.get(id);
     }
@@ -29,13 +28,12 @@ wsServer = new WebSocketServer({
     httpServer: server
 });
 
-const messageTypes = {TEXT: 'TEXT', SYSTEM: 'SYSTEM'};
+const messageTypes = {TEXT: 'TEXT', SYSTEM: 'SYSTEM', REGISTER: 'REGISTER', CONNECTION_SUCCESS: 'CONNECTION_SUCCESS'};
 
 // WebSocket server
 wsServer.on('request', function (request, httpReq) {
     var connection = request.accept(null, request.origin);
     logger.log('new connection');
-    connections.add(connection);
 
     // This is the most important callback for us, we'll handle
     // all messages from users here.
@@ -49,16 +47,29 @@ wsServer.on('request', function (request, httpReq) {
         }
         if (parsedMessage) {
             parsedMessage.time = new Date();
-            parsedMessage.type = messageTypes.TEXT;
-            connections.forEach(conn => {
-                conn.send(JSON.stringify(parsedMessage));
-            })
+            if(parsedMessage.type === messageTypes.TEXT){
+                const channel = getOrCreateChannel(parsedMessage.channelId);
+                channel.forEach(conn => {
+                    conn.send(JSON.stringify(parsedMessage));
+                })
+            }
+            if(parsedMessage.type === messageTypes.REGISTER){
+                const channel = getOrCreateChannel(parsedMessage.channelId);
+                channel.add(connection);
+                connection.send(JSON.stringify({type: messageTypes.CONNECTION_SUCCESS}));
+            }
         }
     });
 
     connection.on('close', function (connection) {
-        logger.log('disconnection');
-        connections.delete(connection);
+        let counter = 0;
+        channels.forEach(channel => {
+            if(channel.has(connection)){
+                channel.delete(connection);
+                counter++;
+            }
+        });
+        logger.log(`Disconnection. Deleted from ${counter} channels`);
     });
 });
 
